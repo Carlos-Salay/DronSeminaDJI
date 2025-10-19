@@ -1,60 +1,65 @@
-# --- archivo: main.py ---
+# --- archivo: main.py (Modificado) ---
 
 import cv2
-# La línea 'import time' se ha eliminado
+from djitellopy import Tello
+import time
 
-from controlador_dron import ControladorDron
+# Importamos las clases que hemos creado
 from horizonte_artificial import HorizonteArtificial
-from proximidad_sensor import ProximitySensor
-from alerta_suelo import AlertaSuelo
-from display_controles import DisplayControles
 
-FRAME_WIDTH = 800
-FRAME_HEIGHT = 600
 
 
 def main():
-    dron = ControladorDron()
+    # --- 1. CONFIGURACIÓN ---
+    FRAME_WIDTH, FRAME_HEIGHT = 960, 720
+
+    # Conectar al Dron
+    drone = Tello()
+    drone.connect()
+    print(f"Batería: {drone.get_battery()}%")
+    drone.streamon()
+    frame_read = drone.get_frame_read()
+
+    # Crear instancias de nuestros módulos
+    controlador = ControladorVuelo(drone)
     horizonte = HorizonteArtificial(width=FRAME_WIDTH, height=FRAME_HEIGHT)
-    sensor_proximidad = ProximitySensor(FRAME_WIDTH, FRAME_HEIGHT)
-    alerta_suelo = AlertaSuelo(critical_height_dm=3, warning_height_dm=6)
-    display_controles = DisplayControles()
 
+    running = True
+
+    # --- 2. BUCLE PRINCIPAL ---
     try:
-        while True:
-            frame = dron.get_frame()
-            if frame is None or frame.size == 0:
-                continue
+        while running:
+            # La lógica de control ahora está encapsulada en esta simple llamada.
+            # Si retorna False, salimos del bucle.
+            running = controlador.manejar_eventos_teclado()
 
-            telemetry = dron.get_telemetry()
+            # Obtener y mostrar el video
+            frame = frame_read.frame
             frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
 
-            key = cv2.waitKey(1) & 0xFF
+            # Dibujar el horizonte artificial
+            roll = drone.get_roll()
+            pitch = drone.get_pitch()
+            horizonte.draw(frame, roll, pitch)
 
-            dron.manejar_teclado(key)
+            # Mostrar telemetría en pantalla
+            cv2.putText(frame, f"Roll: {roll:.1f} Pitch: {pitch:.1f}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-            sensor_proximidad.detect(frame)
-            horizonte.draw(frame, telemetry['roll'], telemetry['pitch'])
-            alerta_suelo.update_and_draw(frame, telemetry['height'])
-            display_controles.draw(frame, key)
+            cv2.imshow("Tello Main Display", frame)
+            cv2.waitKey(1)
 
-            cv2.putText(frame, f"Roll: {telemetry['roll']:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.putText(frame, f"Pitch: {telemetry['pitch']:.1f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0),
-                        2)
-
-            cv2.imshow("Tello Control Center", frame)
-
-            # La línea 'time.sleep(0.02)' se ha eliminado
-
-            if key == 27:  # Salir con ESC
-                break
-
-    except Exception as e:
-        print(f"Ocurrió un error en el bucle principal: {e}")
+            # Limitar la velocidad del bucle para no sobrecargar la CPU
+            time.sleep(1 / 60)  # Apuntar a 60 FPS
 
     finally:
-        dron.cleanup()
+        # --- 3. LIMPIEZA ---
+        print("Cerrando el programa...")
+        controlador.cleanup()
+        drone.streamoff()
+        drone.end()
         cv2.destroyAllWindows()
+        print("Programa cerrado correctamente.")
 
 
 if __name__ == "__main__":
