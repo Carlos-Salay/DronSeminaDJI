@@ -1,65 +1,73 @@
-# --- archivo: main.py (Modificado) ---
+# --- archivo: main.py (Adaptado para Pygame) ---
 
 import cv2
-from djitellopy import Tello
-import time
-
-# Importamos las clases que hemos creado
+import pygame
+from controlador_dron import ControladorDron
 from horizonte_artificial import HorizonteArtificial
 
+FRAME_WIDTH = 960
+FRAME_HEIGHT = 720
 
 
 def main():
-    # --- 1. CONFIGURACIÓN ---
-    FRAME_WIDTH, FRAME_HEIGHT = 960, 720
+    # 1. Inicializar Pygame para capturar eventos de teclado
+    pygame.init()
+    # No necesitamos una ventana grande, solo la necesitamos para que Pygame funcione
+    screen = pygame.display.set_mode((200, 200))
+    pygame.display.set_caption("Tello Keyboard Input")
 
-    # Conectar al Dron
-    drone = Tello()
-    drone.connect()
-    print(f"Batería: {drone.get_battery()}%")
-    drone.streamon()
-    frame_read = drone.get_frame_read()
-
-    # Crear instancias de nuestros módulos
-    controlador = ControladorVuelo(drone)
+    # 2. Inicializar los componentes del dron
+    dron = ControladorDron()
     horizonte = HorizonteArtificial(width=FRAME_WIDTH, height=FRAME_HEIGHT)
 
     running = True
-
-    # --- 2. BUCLE PRINCIPAL ---
     try:
         while running:
-            # La lógica de control ahora está encapsulada en esta simple llamada.
-            # Si retorna False, salimos del bucle.
-            running = controlador.manejar_eventos_teclado()
+            # 3. Bucle de eventos de Pygame
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    # Si se presiona ESC, salimos
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    else:
+                        dron.keydown(event.key)
+                elif event.type == pygame.KEYUP:
+                    dron.keyup(event.key)
 
-            # Obtener y mostrar el video
-            frame = frame_read.frame
+            # --- El resto del código es casi igual ---
+
+            frame = dron.get_frame()
+            if frame is None or frame.size == 0:
+                continue
+
             frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+            telemetry = dron.get_telemetry()
 
-            # Dibujar el horizonte artificial
-            roll = drone.get_roll()
-            pitch = drone.get_pitch()
-            horizonte.draw(frame, roll, pitch)
+            # 4. Actualizar el estado del dron continuamente
+            dron.update()
 
-            # Mostrar telemetría en pantalla
-            cv2.putText(frame, f"Roll: {roll:.1f} Pitch: {pitch:.1f}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            # 5. Dibujar los elementos visuales
+            horizonte.draw(frame, telemetry['roll'], telemetry['pitch'])
+            cv2.putText(frame, f"Roll: {telemetry['roll']:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0),
+                        2)
+            cv2.putText(frame, f"Pitch: {telemetry['pitch']:.1f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0),
+                        2)
 
-            cv2.imshow("Tello Main Display", frame)
+            # 6. Mostrar el frame con OpenCV
+            cv2.imshow("Tello Control Center", frame)
+
+            # Pequeña pausa para evitar sobrecargar la CPU y para que OpenCV procese la ventana
             cv2.waitKey(1)
 
-            # Limitar la velocidad del bucle para no sobrecargar la CPU
-            time.sleep(1 / 60)  # Apuntar a 60 FPS
-
+    except Exception as e:
+        print(f"Ocurrió un error en el bucle principal: {e}")
     finally:
-        # --- 3. LIMPIEZA ---
-        print("Cerrando el programa...")
-        controlador.cleanup()
-        drone.streamoff()
-        drone.end()
+        # 7. Limpiar los recursos al salir
+        dron.cleanup()
         cv2.destroyAllWindows()
-        print("Programa cerrado correctamente.")
+        pygame.quit()
 
 
 if __name__ == "__main__":
